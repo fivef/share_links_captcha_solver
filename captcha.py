@@ -6,23 +6,30 @@ import datetime
 import os
 import collections
 import random
+import sys
 
 from PIL import Image
 
 debug = True
 
+show_result_image = False
+
+#show more images for debugging
 show_images = False
 
 #enable full array prints
 #np.set_printoptions(threshold=None)
 
-folder_name = 'Bilder'
-folder_results = 'results'
-labeled_letters_folder = 'labeled_letters'
-labeled_numbers_folder = 'labeled_numbers'
-labeled_little_numbers = 'labeled_little_numbers'
-little_numbers_archive = 'little_numbers_archive'
-temp_little_numbers = 'temp_little_numbers'
+app_path = os.path.dirname(os.path.realpath(__file__))
+
+
+folder_name = os.path.join(app_path,'Bilder')
+folder_results = os.path.join(app_path,'results')
+labeled_letters_folder = os.path.join(app_path,'labeled_letters')
+labeled_numbers_folder = os.path.join(app_path,'labeled_numbers')
+labeled_little_numbers = os.path.join(app_path,'labeled_little_numbers')
+little_numbers_archive = os.path.join(app_path,'little_numbers_archive')
+temp_little_numbers = os.path.join(app_path,'temp_little_numbers')
 
 timestamp = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
 
@@ -90,11 +97,17 @@ def download_image():
 
 	open(os.path.join(folder_name, timestamp + '_downloaded.gif'), 'wb').write(img)
 	
-def convert_gif_to_png():
-	im = Image.open(os.path.join(folder_name, timestamp + '_downloaded.gif'))
+def convert_image_to_png(path_to_image):
+	im = Image.open(path_to_image)
 	#im.convert('RGB')
 
-	print im.save(os.path.join(folder_name, timestamp + '_downloaded.png'), 'PNG')
+	path = os.path.join(folder_name, timestamp + '_downloaded.png')
+
+	dir_name = os.path.dirname(path)
+	if not os.path.exists(dir_name):
+		os.makedirs(dir_name)
+
+	print im.save(path, 'PNG')
 
 def extract_backgroud_letters(captcha):
 		
@@ -528,10 +541,21 @@ def convert_numpy_image_to_cv_mat_32FC1(numpy_image):
 
 
 		
-def main():
-	download_image()
-	
-	convert_gif_to_png()
+def main(image_path, show_result_image):
+	print "Image path: " + str(image_path)
+
+	if image_path:
+		print "using image at path " + str(image_path)
+		if show_result_image:
+			if show_result_image == "show":
+				show_result_image = True
+	else:
+		print "No image path argument given. Test mode enabled. The programm will download a hardcoded captcha from share-links.biz and try to solve it."
+		download_image()
+		image_path = os.path.join(folder_name, timestamp + '_downloaded.gif')
+		show_result_image = True
+
+	convert_image_to_png(image_path)
 	
 	captcha = cv2.imread(os.path.join(folder_name, timestamp + '_downloaded.png'))
 		
@@ -615,7 +639,8 @@ def main():
 	#determine the point to click
 	#randomize it to prevent detection
 	
-	tile_margin = 10
+	#the margin around a nubmer's tile where no click positions should be generated
+	tile_margin = 15
 	
 	left_column_cut_index = column_cut_indexes[number]
 	right_column_cut_index = column_cut_indexes[number+1]
@@ -624,26 +649,47 @@ def main():
 	
 	y_position = random.randint(upper_row_cut_index + tile_margin, lower_row_cut_index - tile_margin)
 	
+	print "XY_RESULT"
 	print x_position
-	
-	
+
 	print y_position
 	
 	#create output image with click circle and recognized number + letter
 	cv2.circle(captcha,(x_position,y_position),5,(255,255,255),-1)
 	cv2.putText(captcha, letter_string + ' ' + number_string , (len(captcha[0])/2,len(captcha)/2), cv2.FONT_HERSHEY_DUPLEX, 1, (255,255,255))
 	
-	cv2.imwrite(os.path.join(folder_results, timestamp + '_result.png'), captcha)
-	
 
-	cv2.imshow("captcha", captcha)
+	path = os.path.join(folder_results, timestamp + '_result.png')
 	
-	cv2.waitKey()
+	dir_name = os.path.dirname(path)
+	if not os.path.exists(dir_name):
+		os.makedirs(dir_name)
+
+	cv2.imwrite(path, captcha)
 	
+	if show_result_image:
+		cv2.imshow("captcha", captcha)
+	
+		cv2.waitKey()
+
 
 if __name__ == "__main__":
+
+	if len(sys.argv) == 1:
+		image_path_arg = None
+		show_result_image_arg = None
+
+	if len(sys.argv) == 2:
+		image_path_arg = sys.argv[1]
+		show_result_image_arg = None
+
+	if len(sys.argv) == 3:
+		image_path_arg = sys.argv[1]
+		show_result_image_arg = sys.argv[2]
+	else:
+		print "To many arguments. Usage captcha.py [image_file_path] [show]"
 	
-	main()
+	main(image_path = image_path_arg, show_result_image = show_result_image_arg)
 		
 
 
