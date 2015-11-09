@@ -1,0 +1,1151 @@
+Index: src/jd/plugins/PluginForDecrypt.java
+===================================================================
+--- src/jd/plugins/PluginForDecrypt.java	(revision 32009)
++++ src/jd/plugins/PluginForDecrypt.java	(working copy)
+@@ -21,21 +21,6 @@
+ import java.util.regex.Matcher;
+ import java.util.regex.Pattern;
+ 
+-import jd.PluginWrapper;
+-import jd.captcha.easy.load.LoadImage;
+-import jd.config.SubConfiguration;
+-import jd.controlling.ProgressController;
+-import jd.controlling.captcha.SkipException;
+-import jd.controlling.downloadcontroller.SingleDownloadController;
+-import jd.controlling.linkcollector.LinkCollector;
+-import jd.controlling.linkcrawler.CrawledLink;
+-import jd.controlling.linkcrawler.LinkCrawler;
+-import jd.controlling.linkcrawler.LinkCrawlerAbort;
+-import jd.controlling.linkcrawler.LinkCrawlerDistributer;
+-import jd.controlling.linkcrawler.LinkCrawlerThread;
+-import jd.http.Browser;
+-import jd.nutils.encoding.Encoding;
+-
+ import org.appwork.utils.Application;
+ import org.appwork.utils.Files;
+ import org.appwork.utils.Hash;
+@@ -49,6 +34,8 @@
+ import org.jdownloader.captcha.blacklist.CaptchaBlackList;
+ import org.jdownloader.captcha.v2.Challenge;
+ import org.jdownloader.captcha.v2.ChallengeResponseController;
++import org.jdownloader.captcha.v2.challenge.clickcaptcha.ClickCaptchaChallenge;
++import org.jdownloader.captcha.v2.challenge.clickcaptcha.ClickedPoint;
+ import org.jdownloader.captcha.v2.challenge.recaptcha.v1.RecaptchaV1CaptchaChallenge;
+ import org.jdownloader.captcha.v2.challenge.stringcaptcha.BasicCaptchaChallenge;
+ import org.jdownloader.captcha.v2.solverjob.SolverJob;
+@@ -56,6 +43,21 @@
+ import org.jdownloader.logging.LogController;
+ import org.jdownloader.plugins.controller.crawler.LazyCrawlerPlugin;
+ 
++import jd.PluginWrapper;
++import jd.captcha.easy.load.LoadImage;
++import jd.config.SubConfiguration;
++import jd.controlling.ProgressController;
++import jd.controlling.captcha.SkipException;
++import jd.controlling.downloadcontroller.SingleDownloadController;
++import jd.controlling.linkcollector.LinkCollector;
++import jd.controlling.linkcrawler.CrawledLink;
++import jd.controlling.linkcrawler.LinkCrawler;
++import jd.controlling.linkcrawler.LinkCrawlerAbort;
++import jd.controlling.linkcrawler.LinkCrawlerDistributer;
++import jd.controlling.linkcrawler.LinkCrawlerThread;
++import jd.http.Browser;
++import jd.nutils.encoding.Encoding;
++
+ /**
+  * Dies ist die Oberklasse fÃ¼r alle Plugins, die Links entschlÃ¼sseln kÃ¶nnen
+  *
+@@ -126,7 +128,7 @@
+ 
+     /**
+      * @since JD2
+-     * */
++     */
+     public void setBrowser(Browser br) {
+         this.br = br;
+     }
+@@ -199,7 +201,7 @@
+      * @param message
+      * @since JD2
+      * @author raztoki
+-     * */
++     */
+     protected DownloadLink createOfflinelink(final String link, final String filename, final String message) {
+         final DownloadLink dl = new DownloadLink(null, null, getHost(), "directhttp://" + Encoding.urlDecode(link, true), true);
+         dl.setProperty("OFFLINE", true);
+@@ -402,6 +404,14 @@
+         return getCaptchaCode(methodname, captchaFile, 0, param, null, null);
+     }
+ 
++    protected ClickedPoint getClickCaptchaCode(File captchaFile, CryptedLink param) throws Exception {
++        return getClickCaptchaCode(getHost(), captchaFile, param);
++    }
++
++    protected ClickedPoint getClickCaptchaCode(String methodname, File captchaFile, CryptedLink param) throws Exception {
++        return getClickCaptchaCode(methodname, captchaFile, 0, param, null, null);
++    }
++
+     public void invalidateLastChallengeResponse() {
+         try {
+             SolverJob<?> lJob = lastSolverJob;
+@@ -446,7 +456,7 @@
+      *            (suggest this code)
+      * @param explain
+      *            (Special captcha? needs explaination? then use this parameter)
+-     * @return
++     * @return String
+      * @throws DecrypterException
+      */
+     protected String getCaptchaCode(String method, File file, int flag, final CryptedLink link, String defaultValue, String explain) throws Exception {
+@@ -461,6 +471,35 @@
+ 
+     }
+ 
++    /**
++     *
++     * @param method
++     *            Method name (name of the captcha method)
++     * @param file
++     *            (imagefile)
++     * @param flag
++     *            (Flag of UserIO.FLAGS
++     * @param link
++     *            (CryptedlinkO)
++     * @param defaultValue
++     *            (suggest this code)
++     * @param explain
++     *            (Special captcha? needs explaination? then use this parameter)
++     * @return ClickedPoint
++     * @throws DecrypterException
++     */
++    protected ClickedPoint getClickCaptchaCode(String method, File file, int flag, final CryptedLink link, String defaultValue, String explain) throws Exception {
++        final File copy = Application.getResource("captchas/" + method + "/" + Hash.getMD5(file) + "." + Files.getExtension(file.getName()));
++        copy.delete();
++        cleanUpCaptchaFiles.add(copy);
++        copy.getParentFile().mkdirs();
++        IO.copyFile(file, copy);
++        file = copy;
++        final ClickCaptchaChallenge c = new ClickCaptchaChallenge(file, explain, this);
++        return handleCaptchaChallenge(c);
++
++    }
++
+     public <ReturnType> ReturnType handleCaptchaChallenge(Challenge<ReturnType> c) throws CaptchaException, InterruptedException, DecrypterException {
+         if (Thread.currentThread() instanceof SingleDownloadController) {
+             logger.severe("PluginForDecrypt.getCaptchaCode inside SingleDownloadController!?");
+Index: src/jd/plugins/decrypter/ShrLnksBz.java
+===================================================================
+--- src/jd/plugins/decrypter/ShrLnksBz.java	(revision 32009)
++++ src/jd/plugins/decrypter/ShrLnksBz.java	(working copy)
+@@ -27,6 +27,13 @@
+ import java.util.List;
+ import java.util.Set;
+ 
++import org.appwork.storage.JSonStorage;
++import org.appwork.utils.formatter.HexFormatter;
++import org.jdownloader.captcha.v2.challenge.clickcaptcha.ClickedPoint;
++import org.mozilla.javascript.Context;
++import org.mozilla.javascript.ContextFactory;
++import org.mozilla.javascript.ScriptableObject;
++
+ import jd.PluginWrapper;
+ import jd.controlling.ProgressController;
+ import jd.gui.UserIO;
+@@ -47,12 +54,6 @@
+ import jd.utils.JDUtilities;
+ import jd.utils.locale.JDL;
+ 
+-import org.appwork.storage.JSonStorage;
+-import org.appwork.utils.formatter.HexFormatter;
+-import org.mozilla.javascript.Context;
+-import org.mozilla.javascript.ContextFactory;
+-import org.mozilla.javascript.ScriptableObject;
+-
+ @DecrypterPlugin(revision = "$Revision$", interfaceVersion = 2, names = { "share-links.biz" }, urls = { "http://[\\w\\.]*?(share-links\\.biz/_[0-9a-z]+|s2l\\.biz/[a-z0-9]+)" }, flags = { 0 })
+ public class ShrLnksBz extends PluginForDecrypt {
+ 
+@@ -179,8 +180,8 @@
+         }
+         /* Captcha handling */
+         if (br.containsHTML("(/captcha/|captcha_container|\"Captcha\"|id=\"captcha\")")) {
+-            // Captcha Recognition broken - auto = false
+-            boolean auto = false;
++            // Captcha Recognition works auto = true
++            boolean auto = true;
+             final int max = 5;
+             boolean failed = true;
+             for (int i = 0; i <= max; i++) {
+@@ -207,8 +208,9 @@
+                     nexturl = getNextUrl(p.x, p.y);
+                 } else {
+                     try {
+-                        final String[] code = this.getCaptchaCode(file, param).split(":");
+-                        nexturl = getNextUrl(Integer.parseInt(code[0]), Integer.parseInt(code[1]));
++                        ClickedPoint captcha_code = this.getClickCaptchaCode(file, param);
++
++                        nexturl = getNextUrl(captcha_code.getX(), captcha_code.getY());
+                     } catch (final Exception e) {
+                         final Point p = UserIO.getInstance().requestClickPositionDialog(file, "share-links.biz", JDL.L("plugins.decrypt.shrlnksbz.desc", "Read the combination in the background and click the corresponding combination in the overview!"));
+                         if (p == null) {
+Index: src/org/jdownloader/captcha/v2/ChallengeResponseController.java
+===================================================================
+--- src/org/jdownloader/captcha/v2/ChallengeResponseController.java	(revision 32009)
++++ src/org/jdownloader/captcha/v2/ChallengeResponseController.java	(working copy)
+@@ -7,12 +7,6 @@
+ import java.util.concurrent.CopyOnWriteArrayList;
+ import java.util.concurrent.atomic.AtomicBoolean;
+ 
+-import jd.controlling.captcha.SkipException;
+-import jd.controlling.captcha.SkipRequest;
+-import jd.plugins.Plugin;
+-import jd.plugins.PluginForDecrypt;
+-import jd.plugins.PluginForHost;
+-
+ import org.appwork.utils.Application;
+ import org.appwork.utils.logging2.LogSource;
+ import org.jdownloader.api.captcha.CaptchaAPISolver;
+@@ -30,6 +24,7 @@
+ import org.jdownloader.captcha.v2.solver.imagetyperz.ImageTyperzCaptchaSolver;
+ import org.jdownloader.captcha.v2.solver.jac.JACSolver;
+ import org.jdownloader.captcha.v2.solver.myjd.CaptchaMyJDSolver;
++import org.jdownloader.captcha.v2.solver.sharelinksbiz.ShareLinksBizSolver;
+ import org.jdownloader.captcha.v2.solver.solver9kw.Captcha9kwSolver;
+ import org.jdownloader.captcha.v2.solver.solver9kw.Captcha9kwSolverClick;
+ import org.jdownloader.captcha.v2.solver.solver9kw.Captcha9kwSolverPuzzle;
+@@ -39,6 +34,12 @@
+ import org.jdownloader.logging.LogController;
+ import org.jdownloader.settings.staticreferences.CFG_GENERAL;
+ 
++import jd.controlling.captcha.SkipException;
++import jd.controlling.captcha.SkipRequest;
++import jd.plugins.Plugin;
++import jd.plugins.PluginForDecrypt;
++import jd.plugins.PluginForHost;
++
+ public class ChallengeResponseController {
+     private static final ChallengeResponseController INSTANCE = new ChallengeResponseController();
+ 
+@@ -102,6 +103,8 @@
+ 
+             }
+             addSolver(CaptchaAPISolver.getInstance());
++            addSolver(ShareLinksBizSolver.getInstance());
++
+         }
+     }
+ 
+Index: src/org/jdownloader/captcha/v2/solver/sharelinksbiz/AutoTrust.java
+===================================================================
+--- src/org/jdownloader/captcha/v2/solver/sharelinksbiz/AutoTrust.java	(nonexistent)
++++ src/org/jdownloader/captcha/v2/solver/sharelinksbiz/AutoTrust.java	(working copy)
+@@ -0,0 +1,48 @@
++package org.jdownloader.captcha.v2.solver.sharelinksbiz;
++
++import org.appwork.storage.Storable;
++
++public class AutoTrust implements Storable {
++    private int value;
++    private int invalid_counter;
++
++    public AutoTrust(/* Storable */) {
++    }
++
++    public AutoTrust(int priority) {
++        this.value = priority;
++        this.counter = 1;
++        this.invalid_counter = 0;
++    }
++
++    public int getValue() {
++        return value;
++    }
++
++    public void setValue(int value) {
++        this.value = value;
++    }
++
++    public long getCounter() {
++        return counter;
++    }
++
++    public void setCounter(long counter) {
++        this.counter = counter;
++    }
++
++    private long counter;
++
++    public void add(int priority) {
++        value = (int) ((value * counter + priority) / (counter + 1));
++        counter++;
++    }
++
++    public void incrementInvalidCounter() {
++        invalid_counter++;
++    }
++
++    public int getInvalidCount() {
++        return invalid_counter;
++    }
++}
+Index: src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolver.java
+===================================================================
+--- src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolver.java	(nonexistent)
++++ src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolver.java	(working copy)
+@@ -0,0 +1,230 @@
++package org.jdownloader.captcha.v2.solver.sharelinksbiz;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.io.InputStreamReader;
++import java.util.HashMap;
++import java.util.Locale;
++
++import org.appwork.shutdown.ShutdownController;
++import org.appwork.shutdown.ShutdownEvent;
++import org.appwork.shutdown.ShutdownRequest;
++import org.appwork.storage.config.JsonConfig;
++import org.appwork.utils.StringUtils;
++import org.appwork.utils.logging2.LogSource;
++import org.jdownloader.captcha.v2.AbstractResponse;
++import org.jdownloader.captcha.v2.Challenge;
++import org.jdownloader.captcha.v2.ChallengeResponseValidation;
++import org.jdownloader.captcha.v2.challenge.clickcaptcha.ClickCaptchaChallenge;
++import org.jdownloader.captcha.v2.challenge.clickcaptcha.ClickedPoint;
++import org.jdownloader.captcha.v2.challenge.stringcaptcha.ClickCaptchaResponse;
++import org.jdownloader.captcha.v2.solver.CESChallengeSolver;
++import org.jdownloader.captcha.v2.solver.CESSolverJob;
++import org.jdownloader.captcha.v2.solver.jac.SolverException;
++import org.jdownloader.captcha.v2.solverjob.SolverJob;
++import org.jdownloader.logging.LogController;
++
++import jd.captcha.JACMethod;
++import jd.plugins.Plugin;
++import jd.plugins.PluginForDecrypt;
++import jd.plugins.PluginForHost;
++
++public class ShareLinksBizSolver extends CESChallengeSolver<ClickedPoint> implements ChallengeResponseValidation {
++
++    private static final double              _0_85                       = 0.85;
++    private ShareLinksBizSolverConfig        config;
++    private static final ShareLinksBizSolver INSTANCE                    = new ShareLinksBizSolver();
++    private final HashMap<String, Integer>   ShareLinksBizMethodTrustMap = new HashMap<String, Integer>();
++    private HashMap<String, AutoTrust>       threshold;
++    private LogSource                        logger;
++
++    /**
++     * get the only existing instance of ShareLinksBizSolverSolver. This is a singleton
++     *
++     * @return
++     */
++    public static ShareLinksBizSolver getInstance() {
++        return ShareLinksBizSolver.INSTANCE;
++    }
++
++    /**
++     * Create a new instance of ShareLinksBizSolver. This is a singleton class. Access the only existing instance by using
++     * {@link #getInstance()}.
++     */
++    @Override
++    public ShareLinksBizSolverService getService() {
++        return (ShareLinksBizSolverService) super.getService();
++    }
++
++    private ShareLinksBizSolver() {
++        super(new ShareLinksBizSolverService(), 5);
++        config = JsonConfig.create(ShareLinksBizSolverConfig.class);
++
++        logger = LogController.getInstance().getLogger(ShareLinksBizSolver.class.getName());
++        threshold = config.getShareLinksBizThreshold();
++        if (threshold == null) {
++            threshold = new HashMap<String, AutoTrust>();
++        }
++        ShutdownController.getInstance().addShutdownEvent(new ShutdownEvent() {
++
++            @Override
++            public void onShutdown(ShutdownRequest shutdownRequest) {
++                config.setShareLinksBizThreshold(threshold);
++            }
++        });
++
++    }
++
++    @Override
++    public long getTimeout() {
++
++        return 30000;
++    }
++
++    @Override
++    protected void solveCES(CESSolverJob<ClickedPoint> job) throws InterruptedException, SolverException {
++        if (job.getChallenge() instanceof ClickCaptchaChallenge && isEnabled()) {
++            ClickCaptchaChallenge captchaChallenge = (ClickCaptchaChallenge) job.getChallenge();
++            String host = null;
++            if (captchaChallenge.getPlugin() instanceof PluginForHost) {
++                host = ((PluginForHost) captchaChallenge.getPlugin()).getHost();
++            } else if (captchaChallenge.getPlugin() instanceof PluginForDecrypt) {
++                host = ((PluginForDecrypt) captchaChallenge.getPlugin()).getHost();
++            }
++            String trustID = (host + "_" + captchaChallenge.getTypeID()).toLowerCase(Locale.ENGLISH);
++            if (StringUtils.isEmpty(captchaChallenge.getTypeID())) {
++                return;
++            }
++            job.getLogger().info("ShareLinksBiz handles " + job);
++            job.getLogger().info("ShareLinksBiz: enabled: " + config.isEnabled() + " Has Method: " + JACMethod.hasMethod(captchaChallenge.getTypeID()));
++            if (!config.isEnabled() || !JACMethod.hasMethod(captchaChallenge.getTypeID())) {
++                return;
++            }
++            checkInterruption();
++
++            String image_path = captchaChallenge.getImageFile().getAbsolutePath();
++
++            job.getLogger().info("ShareLinksBiz image path " + image_path);
++
++            ClickedPoint clicked_point = new ClickedPoint();
++
++            try {
++                Process p = Runtime.getRuntime().exec("python D:\\repos\\share_links_captcha_solver\\captcha.py " + image_path);
++
++                BufferedReader stdInput = new BufferedReader(new InputStreamReader(p.getInputStream()));
++
++                BufferedReader stdError = new BufferedReader(new InputStreamReader(p.getErrorStream()));
++
++                String s;
++                // read the output from the command
++                System.out.println("Output of captcha.py:\n");
++                while ((s = stdInput.readLine()) != null) {
++                    System.out.println(s);
++                    if (s.equals("XY_RESULT")) {
++                        job.getLogger().info("XY_RESULT found");
++                        clicked_point.setX(Integer.parseInt(stdInput.readLine()));
++                        clicked_point.setY(Integer.parseInt(stdInput.readLine()));
++                        break;
++                    }
++                }
++
++                // read any errors from the attempted command
++                System.out.println("Standard error of captcha.py (if any):\n");
++                while ((s = stdError.readLine()) != null) {
++                    System.out.println(s);
++
++                }
++            } catch (IOException e) {
++                e.printStackTrace();
++            }
++
++            // set priority to same as Manual Click Solver to make it work
++            ClickCaptchaResponse response = new ClickCaptchaResponse(captchaChallenge, this, clicked_point, 100);
++            job.setAnswer(response);
++            job.getLogger().info("Set answer to  " + clicked_point.getX() + ", " + clicked_point.getY());
++
++        }
++
++    }
++
++    public boolean canHandle(Challenge<?> c) {
++        return c.isAccountLogin() == false && super.canHandle(c);
++    }
++
++    public void setMethodTrustThreshold(PluginForHost plugin, String method, int threshold) {
++        String trustID = (plugin.getHost() + "_" + method).toLowerCase(Locale.ENGLISH);
++        synchronized (ShareLinksBizMethodTrustMap) {
++            if (threshold < 0 || threshold > 100) {
++                ShareLinksBizMethodTrustMap.remove(trustID);
++            } else {
++                ShareLinksBizMethodTrustMap.put(trustID, threshold);
++            }
++        }
++    }
++
++    @Override
++    public void setValid(AbstractResponse<?> response, SolverJob<?> job) {
++        logger.info("ShareLinksBizSolver setValid!!!");
++        if (response.getSolver() != this) {
++            return;
++        }
++        if (response instanceof ClickCaptchaResponse) {
++            int priority = ((ClickCaptchaResponse) response).getPriority();
++            Challenge<?> challenge = response.getChallenge();
++            if (challenge instanceof ClickCaptchaChallenge) {
++                Plugin plugin = ((ClickCaptchaChallenge) challenge).getPlugin();
++                String trustID = (plugin.getHost() + "_" + challenge.getTypeID()).toLowerCase(Locale.ENGLISH);
++                synchronized (threshold) {
++
++                    AutoTrust trustValue = threshold.get(trustID);
++                    if (trustValue == null) {
++                        threshold.put(trustID, new AutoTrust(priority));
++                    } else {
++                        trustValue.add(priority);
++                    }
++                    logger.info("New ShareLinksBizSolver Threshold for " + trustID + " : " + trustValue.getValue() + "(" + trustValue.getCounter() + ")");
++
++                }
++
++            }
++        }
++
++    }
++
++    @Override
++    public void setUnused(AbstractResponse<?> response, SolverJob<?> job) {
++    }
++
++    @Override
++    public void setInvalid(AbstractResponse<?> response, SolverJob<?> job) {
++        logger.info("ShareLinksBizSolver setInvalid!!!");
++        if (response instanceof ClickCaptchaResponse) {
++            int priority = ((ClickCaptchaResponse) response).getPriority();
++            Challenge<?> challenge = response.getChallenge();
++            if (challenge instanceof ClickCaptchaChallenge) {
++                Plugin plugin = ((ClickCaptchaChallenge) challenge).getPlugin();
++                String trustID = (plugin.getHost() + "_" + challenge.getTypeID()).toLowerCase(Locale.ENGLISH);
++                synchronized (threshold) {
++
++                    AutoTrust trustValue = threshold.get(trustID);
++
++                    if (trustValue != null) {
++                        logger.info("ShareLinksBizSolver Failure for " + trustID + "; : TrustValue " + priority + "; Dynamic Trust: " + trustValue.getValue() + "(" + trustValue.getCounter() + ") Detected: " + response.getValue());
++                        // increase trustValue!
++                        trustValue.add((int) (priority * (1d + (1d - _0_85) * 2)));
++                        trustValue.incrementInvalidCounter();
++                        logger.info("New ShareLinksBizSolver Threshold for " + trustID + " : " + trustValue.getValue() + "(Total Counter:" + trustValue.getCounter() + ", Invalid Counter " + trustValue.getInvalidCount() + ")");
++                    }
++                }
++
++            }
++        }
++
++    }
++
++    @Override
++    protected boolean validateLogins() {
++        return true;
++    }
++
++}
+Index: src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverConfig.java
+===================================================================
+--- src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverConfig.java	(nonexistent)
++++ src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverConfig.java	(working copy)
+@@ -0,0 +1,23 @@
++package org.jdownloader.captcha.v2.solver.sharelinksbiz;
++
++import java.util.HashMap;
++
++import org.appwork.storage.config.annotations.AboutConfig;
++import org.appwork.storage.config.annotations.DefaultIntValue;
++import org.jdownloader.captcha.v2.ChallengeSolverConfig;
++
++public interface ShareLinksBizSolverConfig extends ChallengeSolverConfig {
++
++    @AboutConfig
++    HashMap<String, AutoTrust> getShareLinksBizThreshold();
++
++    void setShareLinksBizThreshold(HashMap<String, AutoTrust> map);
++
++    @AboutConfig
++    @DefaultIntValue(90)
++    @org.appwork.storage.config.annotations.DescriptionForConfigEntry("Do not Change me unless you know 100000% what this value is used for!")
++    int getDefaultShareLinksBizTrustThreshold();
++
++    void setDefaultShareLinksBizTrustThreshold(int value);
++
++}
+Index: src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverService.java
+===================================================================
+--- src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverService.java	(nonexistent)
++++ src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverService.java	(working copy)
+@@ -0,0 +1,114 @@
++package org.jdownloader.captcha.v2.solver.sharelinksbiz;
++
++import java.util.HashMap;
++import java.util.Map;
++
++import javax.swing.Icon;
++
++import org.appwork.storage.config.JsonConfig;
++import org.jdownloader.captcha.v2.ChallengeSolverConfig;
++import org.jdownloader.captcha.v2.SolverService;
++import org.jdownloader.captcha.v2.solver.service.AbstractSolverService;
++import org.jdownloader.gui.IconKey;
++import org.jdownloader.gui.translate._GUI;
++import org.jdownloader.images.NewTheme;
++import org.jdownloader.settings.advanced.AdvancedConfigManager;
++
++import jd.gui.swing.jdgui.views.settings.panels.anticaptcha.AbstractCaptchaSolverConfigPanel;
++
++public class ShareLinksBizSolverService extends AbstractSolverService implements SolverService {
++    private ShareLinksBizSolverConfig config;
++
++    public ShareLinksBizSolverService() {
++        config = JsonConfig.create(ShareLinksBizSolverConfig.class);
++        AdvancedConfigManager.getInstance().register(config);
++    }
++
++    public static final String ID = "ShareLinksBizSolver";
++
++    @Override
++    public Icon getIcon(int size) {
++        return NewTheme.I().getIcon(IconKey.ICON_OCR, size);
++    }
++
++    @Override
++    public String getType() {
++        return _GUI._.JACSolver_getName_();
++    }
++
++    @Override
++    public String getID() {
++        return ID;
++    }
++
++    @Override
++    public AbstractCaptchaSolverConfigPanel getConfigPanel() {
++        AbstractCaptchaSolverConfigPanel ret = new AbstractCaptchaSolverConfigPanel() {
++
++            {
++                addHeader(getTitle(), ShareLinksBizSolverService.this.getIcon(32));
++                addDescription(ShareLinksBizSolverService.this.getType());
++
++                addBlackWhiteList(config);
++
++            }
++
++            @Override
++            public Icon getIcon() {
++                return ShareLinksBizSolverService.this.getIcon(32);
++            }
++
++            @Override
++            public String getPanelID() {
++                return "ShareLinksBizSolver_" + getTitle();
++            }
++
++            @Override
++            public String getTitle() {
++                return ShareLinksBizSolverService.this.getName();
++            }
++
++            @Override
++            public void save() {
++            }
++
++            @Override
++            public void updateContents() {
++            }
++
++        };
++        return ret;
++    }
++
++    @Override
++    public boolean hasConfigPanel() {
++        return true;
++    }
++
++    @Override
++    public String getName() {
++        return _GUI._.ShareLinksBizSolver_gettypeName_();
++    }
++
++    @Override
++    public ChallengeSolverConfig getConfig() {
++        return config;
++    }
++
++    @Override
++    public Map<String, Integer> getWaitForOthersDefaultMap() {
++        HashMap<String, Integer> ret = new HashMap<String, Integer>();
++        // ret.put(Captcha9kwSolverClick.ID, 60000);
++        // ret.put(DialogClickCaptchaSolver.ID, 60000);
++        // ret.put(DialogBasicCaptchaSolver.ID, 60000);
++        // ret.put(CaptchaAPISolver.ID, 60000);
++        // ret.put(JACSolver.ID, 30000);
++        // ret.put(Captcha9kwSolver.ID, 60000);
++        // ret.put(CaptchaMyJDSolver.ID, 60000);
++        // ret.put(CBSolver.ID, 60000);
++        // ret.put(DeathByCaptchaSolver.ID, 60000);
++
++        return ret;
++    }
++
++}
+Index: src/org/jdownloader/captcha/v2/solver/sharelinksbiz/AutoTrust.java
+===================================================================
+--- src/org/jdownloader/captcha/v2/solver/sharelinksbiz/AutoTrust.java	(nonexistent)
++++ src/org/jdownloader/captcha/v2/solver/sharelinksbiz/AutoTrust.java	(working copy)
+@@ -0,0 +1,48 @@
++package org.jdownloader.captcha.v2.solver.sharelinksbiz;
++
++import org.appwork.storage.Storable;
++
++public class AutoTrust implements Storable {
++    private int value;
++    private int invalid_counter;
++
++    public AutoTrust(/* Storable */) {
++    }
++
++    public AutoTrust(int priority) {
++        this.value = priority;
++        this.counter = 1;
++        this.invalid_counter = 0;
++    }
++
++    public int getValue() {
++        return value;
++    }
++
++    public void setValue(int value) {
++        this.value = value;
++    }
++
++    public long getCounter() {
++        return counter;
++    }
++
++    public void setCounter(long counter) {
++        this.counter = counter;
++    }
++
++    private long counter;
++
++    public void add(int priority) {
++        value = (int) ((value * counter + priority) / (counter + 1));
++        counter++;
++    }
++
++    public void incrementInvalidCounter() {
++        invalid_counter++;
++    }
++
++    public int getInvalidCount() {
++        return invalid_counter;
++    }
++}
+Index: src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolver.java
+===================================================================
+--- src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolver.java	(nonexistent)
++++ src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolver.java	(working copy)
+@@ -0,0 +1,230 @@
++package org.jdownloader.captcha.v2.solver.sharelinksbiz;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.io.InputStreamReader;
++import java.util.HashMap;
++import java.util.Locale;
++
++import org.appwork.shutdown.ShutdownController;
++import org.appwork.shutdown.ShutdownEvent;
++import org.appwork.shutdown.ShutdownRequest;
++import org.appwork.storage.config.JsonConfig;
++import org.appwork.utils.StringUtils;
++import org.appwork.utils.logging2.LogSource;
++import org.jdownloader.captcha.v2.AbstractResponse;
++import org.jdownloader.captcha.v2.Challenge;
++import org.jdownloader.captcha.v2.ChallengeResponseValidation;
++import org.jdownloader.captcha.v2.challenge.clickcaptcha.ClickCaptchaChallenge;
++import org.jdownloader.captcha.v2.challenge.clickcaptcha.ClickedPoint;
++import org.jdownloader.captcha.v2.challenge.stringcaptcha.ClickCaptchaResponse;
++import org.jdownloader.captcha.v2.solver.CESChallengeSolver;
++import org.jdownloader.captcha.v2.solver.CESSolverJob;
++import org.jdownloader.captcha.v2.solver.jac.SolverException;
++import org.jdownloader.captcha.v2.solverjob.SolverJob;
++import org.jdownloader.logging.LogController;
++
++import jd.captcha.JACMethod;
++import jd.plugins.Plugin;
++import jd.plugins.PluginForDecrypt;
++import jd.plugins.PluginForHost;
++
++public class ShareLinksBizSolver extends CESChallengeSolver<ClickedPoint> implements ChallengeResponseValidation {
++
++    private static final double              _0_85                       = 0.85;
++    private ShareLinksBizSolverConfig        config;
++    private static final ShareLinksBizSolver INSTANCE                    = new ShareLinksBizSolver();
++    private final HashMap<String, Integer>   ShareLinksBizMethodTrustMap = new HashMap<String, Integer>();
++    private HashMap<String, AutoTrust>       threshold;
++    private LogSource                        logger;
++
++    /**
++     * get the only existing instance of ShareLinksBizSolverSolver. This is a singleton
++     *
++     * @return
++     */
++    public static ShareLinksBizSolver getInstance() {
++        return ShareLinksBizSolver.INSTANCE;
++    }
++
++    /**
++     * Create a new instance of ShareLinksBizSolver. This is a singleton class. Access the only existing instance by using
++     * {@link #getInstance()}.
++     */
++    @Override
++    public ShareLinksBizSolverService getService() {
++        return (ShareLinksBizSolverService) super.getService();
++    }
++
++    private ShareLinksBizSolver() {
++        super(new ShareLinksBizSolverService(), 5);
++        config = JsonConfig.create(ShareLinksBizSolverConfig.class);
++
++        logger = LogController.getInstance().getLogger(ShareLinksBizSolver.class.getName());
++        threshold = config.getShareLinksBizThreshold();
++        if (threshold == null) {
++            threshold = new HashMap<String, AutoTrust>();
++        }
++        ShutdownController.getInstance().addShutdownEvent(new ShutdownEvent() {
++
++            @Override
++            public void onShutdown(ShutdownRequest shutdownRequest) {
++                config.setShareLinksBizThreshold(threshold);
++            }
++        });
++
++    }
++
++    @Override
++    public long getTimeout() {
++
++        return 30000;
++    }
++
++    @Override
++    protected void solveCES(CESSolverJob<ClickedPoint> job) throws InterruptedException, SolverException {
++        if (job.getChallenge() instanceof ClickCaptchaChallenge && isEnabled()) {
++            ClickCaptchaChallenge captchaChallenge = (ClickCaptchaChallenge) job.getChallenge();
++            String host = null;
++            if (captchaChallenge.getPlugin() instanceof PluginForHost) {
++                host = ((PluginForHost) captchaChallenge.getPlugin()).getHost();
++            } else if (captchaChallenge.getPlugin() instanceof PluginForDecrypt) {
++                host = ((PluginForDecrypt) captchaChallenge.getPlugin()).getHost();
++            }
++            String trustID = (host + "_" + captchaChallenge.getTypeID()).toLowerCase(Locale.ENGLISH);
++            if (StringUtils.isEmpty(captchaChallenge.getTypeID())) {
++                return;
++            }
++            job.getLogger().info("ShareLinksBiz handles " + job);
++            job.getLogger().info("ShareLinksBiz: enabled: " + config.isEnabled() + " Has Method: " + JACMethod.hasMethod(captchaChallenge.getTypeID()));
++            if (!config.isEnabled() || !JACMethod.hasMethod(captchaChallenge.getTypeID())) {
++                return;
++            }
++            checkInterruption();
++
++            String image_path = captchaChallenge.getImageFile().getAbsolutePath();
++
++            job.getLogger().info("ShareLinksBiz image path " + image_path);
++
++            ClickedPoint clicked_point = new ClickedPoint();
++
++            try {
++                Process p = Runtime.getRuntime().exec("python D:\\repos\\share_links_captcha_solver\\captcha.py " + image_path);
++
++                BufferedReader stdInput = new BufferedReader(new InputStreamReader(p.getInputStream()));
++
++                BufferedReader stdError = new BufferedReader(new InputStreamReader(p.getErrorStream()));
++
++                String s;
++                // read the output from the command
++                System.out.println("Output of captcha.py:\n");
++                while ((s = stdInput.readLine()) != null) {
++                    System.out.println(s);
++                    if (s.equals("XY_RESULT")) {
++                        job.getLogger().info("XY_RESULT found");
++                        clicked_point.setX(Integer.parseInt(stdInput.readLine()));
++                        clicked_point.setY(Integer.parseInt(stdInput.readLine()));
++                        break;
++                    }
++                }
++
++                // read any errors from the attempted command
++                System.out.println("Standard error of captcha.py (if any):\n");
++                while ((s = stdError.readLine()) != null) {
++                    System.out.println(s);
++
++                }
++            } catch (IOException e) {
++                e.printStackTrace();
++            }
++
++            // set priority to same as Manual Click Solver to make it work
++            ClickCaptchaResponse response = new ClickCaptchaResponse(captchaChallenge, this, clicked_point, 100);
++            job.setAnswer(response);
++            job.getLogger().info("Set answer to  " + clicked_point.getX() + ", " + clicked_point.getY());
++
++        }
++
++    }
++
++    public boolean canHandle(Challenge<?> c) {
++        return c.isAccountLogin() == false && super.canHandle(c);
++    }
++
++    public void setMethodTrustThreshold(PluginForHost plugin, String method, int threshold) {
++        String trustID = (plugin.getHost() + "_" + method).toLowerCase(Locale.ENGLISH);
++        synchronized (ShareLinksBizMethodTrustMap) {
++            if (threshold < 0 || threshold > 100) {
++                ShareLinksBizMethodTrustMap.remove(trustID);
++            } else {
++                ShareLinksBizMethodTrustMap.put(trustID, threshold);
++            }
++        }
++    }
++
++    @Override
++    public void setValid(AbstractResponse<?> response, SolverJob<?> job) {
++        logger.info("ShareLinksBizSolver setValid!!!");
++        if (response.getSolver() != this) {
++            return;
++        }
++        if (response instanceof ClickCaptchaResponse) {
++            int priority = ((ClickCaptchaResponse) response).getPriority();
++            Challenge<?> challenge = response.getChallenge();
++            if (challenge instanceof ClickCaptchaChallenge) {
++                Plugin plugin = ((ClickCaptchaChallenge) challenge).getPlugin();
++                String trustID = (plugin.getHost() + "_" + challenge.getTypeID()).toLowerCase(Locale.ENGLISH);
++                synchronized (threshold) {
++
++                    AutoTrust trustValue = threshold.get(trustID);
++                    if (trustValue == null) {
++                        threshold.put(trustID, new AutoTrust(priority));
++                    } else {
++                        trustValue.add(priority);
++                    }
++                    logger.info("New ShareLinksBizSolver Threshold for " + trustID + " : " + trustValue.getValue() + "(" + trustValue.getCounter() + ")");
++
++                }
++
++            }
++        }
++
++    }
++
++    @Override
++    public void setUnused(AbstractResponse<?> response, SolverJob<?> job) {
++    }
++
++    @Override
++    public void setInvalid(AbstractResponse<?> response, SolverJob<?> job) {
++        logger.info("ShareLinksBizSolver setInvalid!!!");
++        if (response instanceof ClickCaptchaResponse) {
++            int priority = ((ClickCaptchaResponse) response).getPriority();
++            Challenge<?> challenge = response.getChallenge();
++            if (challenge instanceof ClickCaptchaChallenge) {
++                Plugin plugin = ((ClickCaptchaChallenge) challenge).getPlugin();
++                String trustID = (plugin.getHost() + "_" + challenge.getTypeID()).toLowerCase(Locale.ENGLISH);
++                synchronized (threshold) {
++
++                    AutoTrust trustValue = threshold.get(trustID);
++
++                    if (trustValue != null) {
++                        logger.info("ShareLinksBizSolver Failure for " + trustID + "; : TrustValue " + priority + "; Dynamic Trust: " + trustValue.getValue() + "(" + trustValue.getCounter() + ") Detected: " + response.getValue());
++                        // increase trustValue!
++                        trustValue.add((int) (priority * (1d + (1d - _0_85) * 2)));
++                        trustValue.incrementInvalidCounter();
++                        logger.info("New ShareLinksBizSolver Threshold for " + trustID + " : " + trustValue.getValue() + "(Total Counter:" + trustValue.getCounter() + ", Invalid Counter " + trustValue.getInvalidCount() + ")");
++                    }
++                }
++
++            }
++        }
++
++    }
++
++    @Override
++    protected boolean validateLogins() {
++        return true;
++    }
++
++}
+Index: src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverConfig.java
+===================================================================
+--- src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverConfig.java	(nonexistent)
++++ src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverConfig.java	(working copy)
+@@ -0,0 +1,23 @@
++package org.jdownloader.captcha.v2.solver.sharelinksbiz;
++
++import java.util.HashMap;
++
++import org.appwork.storage.config.annotations.AboutConfig;
++import org.appwork.storage.config.annotations.DefaultIntValue;
++import org.jdownloader.captcha.v2.ChallengeSolverConfig;
++
++public interface ShareLinksBizSolverConfig extends ChallengeSolverConfig {
++
++    @AboutConfig
++    HashMap<String, AutoTrust> getShareLinksBizThreshold();
++
++    void setShareLinksBizThreshold(HashMap<String, AutoTrust> map);
++
++    @AboutConfig
++    @DefaultIntValue(90)
++    @org.appwork.storage.config.annotations.DescriptionForConfigEntry("Do not Change me unless you know 100000% what this value is used for!")
++    int getDefaultShareLinksBizTrustThreshold();
++
++    void setDefaultShareLinksBizTrustThreshold(int value);
++
++}
+Index: src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverService.java
+===================================================================
+--- src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverService.java	(nonexistent)
++++ src/org/jdownloader/captcha/v2/solver/sharelinksbiz/ShareLinksBizSolverService.java	(working copy)
+@@ -0,0 +1,114 @@
++package org.jdownloader.captcha.v2.solver.sharelinksbiz;
++
++import java.util.HashMap;
++import java.util.Map;
++
++import javax.swing.Icon;
++
++import org.appwork.storage.config.JsonConfig;
++import org.jdownloader.captcha.v2.ChallengeSolverConfig;
++import org.jdownloader.captcha.v2.SolverService;
++import org.jdownloader.captcha.v2.solver.service.AbstractSolverService;
++import org.jdownloader.gui.IconKey;
++import org.jdownloader.gui.translate._GUI;
++import org.jdownloader.images.NewTheme;
++import org.jdownloader.settings.advanced.AdvancedConfigManager;
++
++import jd.gui.swing.jdgui.views.settings.panels.anticaptcha.AbstractCaptchaSolverConfigPanel;
++
++public class ShareLinksBizSolverService extends AbstractSolverService implements SolverService {
++    private ShareLinksBizSolverConfig config;
++
++    public ShareLinksBizSolverService() {
++        config = JsonConfig.create(ShareLinksBizSolverConfig.class);
++        AdvancedConfigManager.getInstance().register(config);
++    }
++
++    public static final String ID = "ShareLinksBizSolver";
++
++    @Override
++    public Icon getIcon(int size) {
++        return NewTheme.I().getIcon(IconKey.ICON_OCR, size);
++    }
++
++    @Override
++    public String getType() {
++        return _GUI._.JACSolver_getName_();
++    }
++
++    @Override
++    public String getID() {
++        return ID;
++    }
++
++    @Override
++    public AbstractCaptchaSolverConfigPanel getConfigPanel() {
++        AbstractCaptchaSolverConfigPanel ret = new AbstractCaptchaSolverConfigPanel() {
++
++            {
++                addHeader(getTitle(), ShareLinksBizSolverService.this.getIcon(32));
++                addDescription(ShareLinksBizSolverService.this.getType());
++
++                addBlackWhiteList(config);
++
++            }
++
++            @Override
++            public Icon getIcon() {
++                return ShareLinksBizSolverService.this.getIcon(32);
++            }
++
++            @Override
++            public String getPanelID() {
++                return "ShareLinksBizSolver_" + getTitle();
++            }
++
++            @Override
++            public String getTitle() {
++                return ShareLinksBizSolverService.this.getName();
++            }
++
++            @Override
++            public void save() {
++            }
++
++            @Override
++            public void updateContents() {
++            }
++
++        };
++        return ret;
++    }
++
++    @Override
++    public boolean hasConfigPanel() {
++        return true;
++    }
++
++    @Override
++    public String getName() {
++        return _GUI._.ShareLinksBizSolver_gettypeName_();
++    }
++
++    @Override
++    public ChallengeSolverConfig getConfig() {
++        return config;
++    }
++
++    @Override
++    public Map<String, Integer> getWaitForOthersDefaultMap() {
++        HashMap<String, Integer> ret = new HashMap<String, Integer>();
++        // ret.put(Captcha9kwSolverClick.ID, 60000);
++        // ret.put(DialogClickCaptchaSolver.ID, 60000);
++        // ret.put(DialogBasicCaptchaSolver.ID, 60000);
++        // ret.put(CaptchaAPISolver.ID, 60000);
++        // ret.put(JACSolver.ID, 30000);
++        // ret.put(Captcha9kwSolver.ID, 60000);
++        // ret.put(CaptchaMyJDSolver.ID, 60000);
++        // ret.put(CBSolver.ID, 60000);
++        // ret.put(DeathByCaptchaSolver.ID, 60000);
++
++        return ret;
++    }
++
++}
+Index: src/org/jdownloader/gui/translate/GuiTranslation.java
+===================================================================
+--- src/org/jdownloader/gui/translate/GuiTranslation.java	(revision 32009)
++++ src/org/jdownloader/gui/translate/GuiTranslation.java	(working copy)
+@@ -3979,7 +3979,7 @@
+     // String lit_please_wait_dotdotdot();
+ 
+     // TODO Remove unused code found by UCDetector
+-    // @Default(lngs = { "en" }, values = { "Please choose the correct path to the  FFmpegâ„¢ binary..." })
++    // @Default(lngs = { "en" }, values = { "Please choose the correct path to the FFmpegâ„¢ binary..." })
+     // String FFMpegInstallTypeChooserDialog_layoutDialogContent_help_();
+ 
+     @Default(lngs = { "en" }, values = { "FFmpegâ„¢ Setup" })
+@@ -4060,7 +4060,10 @@
+ 
+     // TODO Remove unused code found by UCDetector
+     // @Default(lngs = { "en" }, values = {
+-    // "<html><b>JDownloader</b> has partnered with the <b>Open Source Research Group at Friedrich-Alexander University Erlangen-NÃ¼rnberg</b> to conduct a series of surveys.  The research is intended to improve the JDownloader experience and/or promote academic research into applied software development. There is no financial motivation behind this collaboration, but the whole JDownloader Project will profit from the survey results.<br>Please consider taking a moment to support this research.</html>"
++    // "<html><b>JDownloader</b> has partnered with the <b>Open Source Research Group at Friedrich-Alexander University
++    // Erlangen-NÃ¼rnberg</b> to conduct a series of surveys. The research is intended to improve the JDownloader experience and/or promote
++    // academic research into applied software development. There is no financial motivation behind this collaboration, but the whole
++    // JDownloader Project will profit from the survey results.<br>Please consider taking a moment to support this research.</html>"
+     // })
+     // String osr_dialog_message();
+ 
+@@ -4912,7 +4915,8 @@
+ 
+     // TODO Remove unused code found by UCDetector
+     // @Default(lngs = { "en" }, values = {
+-    // "If this proxy does not work with certain domains, JDownloader will ban the proxy for a few minutes. If the proxy is banned right now, you will see an entry here."
++    // "If this proxy does not work with certain domains, JDownloader will ban the proxy for a few minutes. If the proxy is banned right
++    // now, you will see an entry here."
+     // })
+     // String proxyDetailsDialog_white_bans_explain();
+ 
+@@ -5306,6 +5310,9 @@
+     @Default(lngs = { "en" }, values = { "JAntiCaptcha" })
+     String JACSolver_gettypeName_();
+ 
++    @Default(lngs = { "en" }, values = { "share-links.biz Click Captcha Solver" })
++    String ShareLinksBizSolver_gettypeName_();
++
+     @Default(lngs = { "en" }, values = { "Fully automated remote Captcha Solving" })
+     String Captcha9kwSolver_getName_();
+ 
